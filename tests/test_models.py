@@ -2,6 +2,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.models.outbox import Outbox, OutboxStatus
 from app.models.payment import Payment, PaymentStatus
 
 
@@ -20,3 +21,14 @@ def test_create_payment():
     assert payment.status == PaymentStatus.pending
     assert payment.metadata_ == {"key": "value"}
     assert payment.processed_at is None
+
+
+def test_create_outbox():
+    outbox = Outbox(
+        event_type="payment.new",
+        payload={"payment_id": "123"},
+        status=OutboxStatus.pending,
+    )
+    assert outbox.event_type == "payment.new"
+    assert outbox.payload == {"payment_id": "123"}
+    assert outbox.status == OutboxStatus.pending
