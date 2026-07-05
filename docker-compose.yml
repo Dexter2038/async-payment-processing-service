@@ -37,6 +37,40 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build: .
+    container_name: payments-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      API_KEY: dev-api-key
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/payments
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      WEBHOOK_TIMEOUT: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  consumer:
+    build: .
+    container_name: payments-consumer
+    restart: unless-stopped
+    environment:
+      API_KEY: dev-api-key
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/payments
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      WEBHOOK_TIMEOUT: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: uv run python -m app.consumer_main # файл consumer_main.py ещё не создан, но будет позже
+
 volumes:
   pgdata:
   rabbitdata:
