@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.v1.payments import router as payments_router
 from app.config import settings
 
 app = FastAPI(
@@ -8,6 +9,8 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+app.include_router(payments_router, prefix="/api/v1/payments", tags=["payments"])
 
 
 @app.get("/health")
