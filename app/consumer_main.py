@@ -1,5 +1,6 @@
 import asyncio
 
+import app.broker.consumer  # noqa: F401  # регистрирует subscriber
 from app.broker.rabbitmq import broker
 from app.broker.topology import declare_topology
 from app.services.outbox_publisher import outbox_poller
