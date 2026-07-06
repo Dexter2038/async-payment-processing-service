@@ -3,10 +3,12 @@ from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.config import settings
 from app.db.session import async_session_factory
 from app.main import app
+from app.models.outbox import Outbox, OutboxStatus
 from app.models.payment import Payment, PaymentStatus
 
 
@@ -92,3 +94,36 @@ async def test_get_payment_not_found():
             headers={"X-API-Key": settings.api_key},
         )
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_payment_writes_to_outbox():
+    # Используем уникальный idempotency_key, чтобы не мешать другим тестам
+    unique_key = f"outbox-test-{uuid.uuid4()}"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/payments",
+            json={
+                "amount": "30.00",
+                "currency": "USD",
+                "webhook_url": "https://example.com/webhook",
+            },
+            headers={
+                "X-API-Key": settings.api_key,
+                "Idempotency-Key": unique_key,
+            },
+        )
+    assert response.status_code == 202
+    payment_id = response.json()["payment_id"]
+
+    # Проверяем наличие записи в Outbox напрямую через сессию
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Outbox).where(Outbox.payload["payment_id"].as_string() == payment_id)
+        )
+        outbox_entry = result.scalar_one_or_none()
+        assert outbox_entry is not None
+        assert outbox_entry.event_type == "payment.new"
+        assert outbox_entry.status == OutboxStatus.pending
+        assert outbox_entry.payload["payment_id"] == payment_id

@@ -1,7 +1,10 @@
+import json
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas import PaymentCreate
+from app.models.outbox import Outbox, OutboxStatus
 from app.models.payment import Payment, PaymentStatus
 
 
@@ -28,6 +31,19 @@ async def create_payment(
         status=PaymentStatus.pending,
     )
     db.add(payment)
+    await db.flush()
+
+    outbox_entry = Outbox(
+        event_type="payment.new",
+        payload={
+            "payment_id": payment.id,
+            "amount": str(payment.amount),
+            "currency": payment.currency,
+            "webhook_url": payment.webhook_url,
+        },
+        status=OutboxStatus.pending,
+    )
+    db.add(outbox_entry)
     await db.commit()
     await db.refresh(payment)
     return payment
