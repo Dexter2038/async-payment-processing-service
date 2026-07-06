@@ -5,6 +5,11 @@ from app.api.v1.schemas import PaymentCreate
 from app.models.payment import Payment, PaymentStatus
 
 
+async def get_payment_by_id(db: AsyncSession, payment_id: str) -> Payment | None:
+    result = await db.execute(select(Payment).where(Payment.id == payment_id))
+    return result.scalar_one_or_none()
+
+
 async def get_payment_by_idempotency_key(db: AsyncSession, key: str) -> Payment | None:
     result = await db.execute(select(Payment).where(Payment.idempotency_key == key))
     return result.scalar_one_or_none()
