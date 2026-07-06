@@ -43,3 +43,4 @@ class Payment(Base):
     processed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    webhook_sent: Mapped[bool] = mapped_column(default=False, nullable=False)

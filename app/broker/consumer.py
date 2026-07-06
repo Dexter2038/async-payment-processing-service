@@ -54,6 +54,10 @@ async def handle_payment(msg: dict):
             logger.error(f"Payment {payment_id} not found")
             return
 
+        if payment.webhook_sent:
+            logger.info(f"Webhook already sent for payment {payment_id}, skipping")
+            return
+
         # Эмуляция обработки только в статусе pending
         if payment.status == PaymentStatus.pending:
             delay = random.uniform(2, 5)
@@ -70,26 +74,29 @@ async def handle_payment(msg: dict):
             session.add(payment)
             await session.commit()
 
-        # Ручной retry для webhook с экспоненциальной задержкой
-        max_retries = 3
-        backoff_base = 1  # секунды
-        for attempt in range(1, max_retries + 1):
-            try:
-                await send_webhook(
-                    url=payment.webhook_url,
-                    payment_id=payment.id,
-                    status=payment.status.value,
-                    processed_at=payment.processed_at.isoformat()
-                    if payment.processed_at
-                    else "",
-                )
-                break  # успех
-            except Exception as e:
-                logger.warning(f"Webhook attempt {attempt}/{max_retries} failed: {e}")
-                if attempt == max_retries:
-                    # Все попытки исчерпаны — отправляем в DLQ
-                    await publish_to_dlq(msg)
-                    return  # сообщение подтвердится (ack), т.к. нет исключения
-                else:
-                    backoff = backoff_base * (2 ** (attempt - 1))
-                    await asyncio.sleep(backoff)
+            # Если webhook не был отправлен, пытаемся отправить с retry
+            if not payment.webhook_sent:
+                max_retries = 3
+                backoff_base = 1
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        await send_webhook(
+                            url=payment.webhook_url,
+                            payment_id=payment.id,
+                            status=payment.status.value,
+                            processed_at=payment.processed_at.isoformat()
+                            if payment.processed_at
+                            else "",
+                        )
+                        payment.webhook_sent = True
+                        session.add(payment)
+                        await session.commit()
+                        break
+                    except Exception as e:
+                        logger.warning(
+                            f"Webhook attempt {attempt}/{max_retries} failed: {e}"
+                        )
+                        if attempt == max_retries:
+                            await publish_to_dlq(msg)
+                            return
+                        await asyncio.sleep(backoff_base * (2 ** (attempt - 1)))
