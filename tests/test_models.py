@@ -1,7 +1,5 @@
 from decimal import Decimal
 
-import pytest
-
 from app.models.outbox import Outbox, OutboxStatus
 from app.models.payment import Payment, PaymentStatus
 

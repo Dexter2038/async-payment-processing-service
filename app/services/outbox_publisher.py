@@ -1,7 +1,6 @@
 import asyncio
-import json
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.broker.rabbitmq import broker
 from app.db.session import async_session_factory
