@@ -30,6 +30,16 @@ async def send_webhook(url: str, payment_id: str, status: str, processed_at: str
         logger.info(f"Webhook sent to {url} for payment {payment_id}")
 
 
+async def publish_to_dlq(message: dict):
+    """Публикует сообщение в Dead Letter Queue."""
+    await broker.publish(
+        message,
+        exchange="payments.dlx",
+        routing_key="dead",
+    )
+    logger.info(f"Message sent to DLQ: {message}")
+
+
 @broker.subscriber("payments.new")
 async def handle_payment(msg: dict):
     payment_id = msg.get("payment_id")
@@ -44,33 +54,42 @@ async def handle_payment(msg: dict):
             logger.error(f"Payment {payment_id} not found")
             return
 
-        if payment.status != PaymentStatus.pending:
-            logger.info(
-                f"Payment {payment_id} already processed, status={payment.status}"
-            )
-            return
+        # Эмуляция обработки только в статусе pending
+        if payment.status == PaymentStatus.pending:
+            delay = random.uniform(2, 5)
+            await asyncio.sleep(delay)
+            success = random.random() < 0.9
+            if success:
+                payment.status = PaymentStatus.succeeded
+                logger.info(f"Payment {payment_id} succeeded")
+            else:
+                payment.status = PaymentStatus.failed
+                logger.info(f"Payment {payment_id} failed")
 
-        # Эмуляция обработки платежа
-        delay = random.uniform(2, 5)
-        await asyncio.sleep(delay)
-        success = random.random() < 0.9
-        if success:
-            payment.status = PaymentStatus.succeeded
-            logger.info(f"Payment {payment_id} succeeded")
-        else:
-            payment.status = PaymentStatus.failed
-            logger.info(f"Payment {payment_id} failed")
+            payment.processed_at = datetime.now(timezone.utc)
+            session.add(payment)
+            await session.commit()
 
-        payment.processed_at = datetime.now(timezone.utc)
-        session.add(payment)
-        await session.commit()
-
-        # Отправляем webhook
-        await send_webhook(
-            url=payment.webhook_url,
-            payment_id=payment.id,
-            status=payment.status.value,
-            processed_at=payment.processed_at.isoformat()
-            if payment.processed_at is not None
-            else datetime.utcnow().isoformat(),
-        )
+        # Ручной retry для webhook с экспоненциальной задержкой
+        max_retries = 3
+        backoff_base = 1  # секунды
+        for attempt in range(1, max_retries + 1):
+            try:
+                await send_webhook(
+                    url=payment.webhook_url,
+                    payment_id=payment.id,
+                    status=payment.status.value,
+                    processed_at=payment.processed_at.isoformat()
+                    if payment.processed_at
+                    else "",
+                )
+                break  # успех
+            except Exception as e:
+                logger.warning(f"Webhook attempt {attempt}/{max_retries} failed: {e}")
+                if attempt == max_retries:
+                    # Все попытки исчерпаны — отправляем в DLQ
+                    await publish_to_dlq(msg)
+                    return  # сообщение подтвердится (ack), т.к. нет исключения
+                else:
+                    backoff = backoff_base * (2 ** (attempt - 1))
+                    await asyncio.sleep(backoff)
