@@ -1,10 +1,10 @@
 import asyncio
 
 import pytest
-from faststream.rabbit import ExchangeType, RabbitExchange, RabbitQueue
 from sqlalchemy import select
 
 from app.broker.rabbitmq import broker
+from app.broker.topology import declare_topology
 from app.db.session import async_session_factory
 from app.models.outbox import Outbox, OutboxStatus
 from app.services.outbox_publisher import outbox_poller
@@ -23,17 +23,8 @@ async def test_outbox_poller_publishes_and_updates_status():
         await session.commit()
         entry_id = entry.id
 
-    # Запускаем брокер
     await broker.start()
-
-    # Объявляем обменник и очередь через broker, получаем aio-pika объекты
-    exchange = RabbitExchange("payments", type=ExchangeType.TOPIC)
-    queue = RabbitQueue("payments.new", routing_key="new")
-    rb_exchange = await broker.declare_exchange(exchange)
-    rb_queue = await broker.declare_queue(queue)
-
-    # Привязываем очередь к обменнику
-    await rb_queue.bind(rb_exchange, routing_key="new")
+    await declare_topology()
 
     # Запускаем poller в фоновой задаче с интервалом 0.5 секунды
     poll_task = asyncio.create_task(outbox_poller(interval=0.5))
